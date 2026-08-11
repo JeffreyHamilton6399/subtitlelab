@@ -104,3 +104,25 @@ Work Log:
 Stage Summary:
 - Create mode is now reliably usable in ANY environment: Manual mode needs no mic/internet and always works; Auto mode fails fast with actionable guidance when the mic is blocked.
 - Pushed: https://github.com/JeffreyHamilton6399/subtitlelab/commit/0a295f7
+
+---
+Task ID: 16-19
+Agent: Z.ai Code (main)
+Task: Diagnose "extraction not working" + ensure SRT generation from video files works on Vercel.
+
+Work Log:
+- Diagnosed with Agent Browser: created /tmp/test-video.mkv (6s, embedded SRT subrip stream via ffmpeg CLI). Uploaded to Extract mode → ffmpeg.wasm loaded, found "1 subtitle track", clicked Extract Subtitle → Download button appeared. Intercepted the Blob download: content was a valid SRT ("1\n00:00:01,000 --> 00:00:03,000\nHello from the test video.\n\n2\n00:00:03,500 --> 00:00:05,000\nSubtitle extraction works.\n"). Extraction WORKS in the dev preview.
+- Root cause of "not working" complaint: production (Vercel) had no COOP/COEP headers, so on the deployed site self.crossOriginIsolated is false and ffmpeg.wasm's worker creation can fail or run without threads. Fixed by:
+  - next.config.ts: async headers() returning Cross-Origin-Opener-Policy: same-origin + Cross-Origin-Embedder-Policy: credentialless on all routes.
+  - vercel.json: same headers for production.
+  - Verified headers live: curl -sI localhost:3000/ shows both headers.
+- extract-subtitles.ts: isCrossOriginIsolated() helper; loadFFmpeg now wraps the CDN toBlobURL fetch AND ffmpeg.load() in try/catch, throwing actionable errors ("Could not download the ffmpeg engine (offline?)..." / "ffmpeg failed to start in this browser...") instead of stalling. resetFFmpegLoad() replaces resetFFmpeg (removed dup).
+- extract-mode UI: loading state now explains "10-30 seconds on slow connections" for first load; error state adds a hint to switch to the Create tab as fallback.
+- Verified Create → Manual mode works for VIDEO files (not just audio): uploaded the test MKV, switched to Manual, the <video> player rendered ("video time scrubber"), Play worked, "Add subtitle at playhead" created an entry at 3.043s→5.543s, typed "Manual caption from video", Download SRT produced valid SRT. No console/runtime errors.
+- Committed (cb44fb0) and pushed to GitHub main.
+
+Stage Summary:
+- Extraction + SRT generation from video verified end-to-end in dev preview.
+- COOP/COEP headers added so ffmpeg.wasm will work on Vercel (top-level page → crossOriginIsolated=true).
+- Two SRT-from-video paths both work: Extract (embedded subs) + Create→Manual (caption by hand). Auto-transcribe still needs a real mic (use Manual in mic-blocked environments).
+- Pushed: https://github.com/JeffreyHamilton6399/subtitlelab/commit/cb44fb0
