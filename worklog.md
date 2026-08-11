@@ -126,3 +126,19 @@ Stage Summary:
 - COOP/COEP headers added so ffmpeg.wasm will work on Vercel (top-level page → crossOriginIsolated=true).
 - Two SRT-from-video paths both work: Extract (embedded subs) + Create→Manual (caption by hand). Auto-transcribe still needs a real mic (use Manual in mic-blocked environments).
 - Pushed: https://github.com/JeffreyHamilton6399/subtitlelab/commit/cb44fb0
+
+---
+Task ID: 20
+Agent: Z.ai Code (main)
+Task: Fix Vercel build failure ("error: script build exited with code 1").
+
+Work Log:
+- Root cause: package.json build script was `next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/` — leftover from the scaffold's `output: "standalone"` config. We removed `output: standalone` from next.config.ts (per spec), so `.next/standalone/` is never created and the `cp` fails, exiting 1. The `next build` itself succeeded.
+- Fix: package.json scripts → build: "next build", start: "next start". Also renamed package to subtitlelab@1.0.0.
+- Verified: `bun run build` now exits 0 cleanly (Compiled successfully in 6.6s, 6 routes prerendered, no errors).
+- Committed (ba00fd4) and pushed to GitHub main.
+- Dev server restarted; Agent Browser confirms app loads (Donate/Settings/dropzone/footer all render).
+
+Stage Summary:
+- Vercel build will now succeed — `next build` is the only build step, no standalone cp.
+- Commit: https://github.com/JeffreyHamilton6399/subtitlelab/commit/ba00fd4
