@@ -59,3 +59,27 @@ Work Log:
 Stage Summary:
 - Edit mode fully verified end-to-end. Extract (ffmpeg.wasm) and Create (Web Speech API) follow the same component pattern and lib code is type-clean, but cannot be fully end-to-end exercised in the headless sandbox (ffmpeg core ~25MB CDN fetch + real video; Web Speech needs mic permission + speech engine). UI rendering + control wiring verified structurally.
 - All non-negotiable requirements met: Next 16 + TS + Tailwind 4 + shadcn/ui, 100% client-side (no backend/db/API routes), emerald accents, no indigo/blue, flat design, custom CC logo, sticky footer, single-screen, mobile-first.
+
+---
+Task ID: 11-13
+Agent: Z.ai Code (main)
+Task: Redesign header to match reference, fix transcription robustness, push to GitHub for Vercel.
+
+Work Log:
+- Analyzed reference image (ShrinkRay-style header) with VLM: top-right = Donate pill (heart icon, rose) + Settings gear that opens a DROPDOWN (not dialog).
+- Rewrote src/components/header.tsx: Donate pill button (rose outline, heart-fill icon) + SettingsMenu.
+- New src/components/settings-menu.tsx: DropdownMenu with Appearance (Light/Dark/System with emerald active dot), Legal section (Privacy Policy w/ Shield icon, Terms of Service w/ FileText icon), GitHub link.
+- Removed old settings-dialog.tsx.
+- New /legal/privacy and /legal/terms pages + shared legal-layout.tsx (back-to-app header, prose-styled content).
+- Fixed transcription (src/lib/transcribe.ts): new TranscriptionUpdate callback API, tracks noSpeechCount, warns "no speech detected" after 4 silent cycles, media element explicitly unmuted+volume=1 so mic can hear it, auto-restart with 250ms delay (no tight loops), clear final error when 0 entries, handles audio-capture/network errors.
+- Updated create-mode.tsx: amber notice explaining "audio plays out loud, mic listens, allow mic, turn up volume, stay online"; shows rose error for empty transcription; uses onUpdate callback.
+- .gitignore: added db/, upload/, tests/, download/, worklog.md, agent-ctx/.
+- Set git author → Jeffrey Hamilton <JeffreyHamilton6399@users.noreply.github.com>.
+- Created GitHub repo via API (token): github.com/JeffreyHamilton6399/subtitlelab (public, default branch main).
+- Committed (244aaa7) and pushed main → GitHub successfully. Remote origin set (clean URL, no token stored).
+- Agent Browser verification: header shows exactly Donate + Settings; dropdown contains Light/Dark/System + Privacy Policy + Terms of Service + GitHub; /legal/privacy and /legal/terms render with all sections; no console/runtime errors; lint clean.
+
+Stage Summary:
+- Header now matches reference design (Donate + gear dropdown with theme/Legal/GitHub).
+- Transcription now gives clear feedback when no speech is detected instead of silently producing nothing.
+- Code pushed to GitHub: https://github.com/JeffreyHamilton6399/subtitlelab — ready to import into Vercel (no env vars needed).
