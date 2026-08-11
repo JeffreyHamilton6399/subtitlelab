@@ -116,7 +116,8 @@ export function ExtractMode({ file, onRemove }: ExtractModeProps) {
             Loading ffmpeg.wasm &amp; scanning for subtitle tracks…
           </p>
           <p className="text-[11px] text-muted-foreground">
-            First load downloads the engine (~25MB) and stays cached.
+            First load downloads the engine (~25&nbsp;MB) and stays cached.
+            This can take 10–30 seconds on slow connections.
           </p>
         </div>
       )}
@@ -127,16 +128,23 @@ export function ExtractMode({ file, onRemove }: ExtractModeProps) {
             {errorMsg || "Something went wrong."}
           </p>
           {!tooLarge && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8"
-              onClick={loadTracks}
-            >
-              <RefreshCw className="size-3.5" />
-              Retry scan
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={loadTracks}
+              >
+                <RefreshCw className="size-3.5" />
+                Retry scan
+              </Button>
+            </div>
           )}
+          <p className="mt-2 max-w-sm text-[11px] leading-relaxed text-muted-foreground">
+            Extraction needs to download the ffmpeg engine on first use. If it
+            keeps failing, switch to the <strong>Create</strong> tab to
+            transcribe the audio instead.
+          </p>
         </div>
       )}
 

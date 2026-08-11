@@ -30,8 +30,29 @@ export type ProgressListener = (ratio: number) => void;
 let ffmpegPromise: Promise<FFmpeg> | null = null;
 
 /**
+ * Whether the page is cross-origin isolated (SharedArrayBuffer available).
+ * The multi-threaded ffmpeg core needs this; the single-threaded core does
+ * not, but it's still a useful signal for the best experience.
+ */
+export function isCrossOriginIsolated(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    (window as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated ===
+    true
+  );
+}
+
+/** Reset the cached ffmpeg instance so the next call reloads from scratch. */
+export function resetFFmpegLoad(): void {
+  ffmpegPromise = null;
+}
+
+/**
  * Lazily load the ffmpeg.wasm core (single-threaded for broad browser
- * compatibility — does not require cross-origin isolation headers).
+ * compatibility — works without cross-origin isolation headers).
+ *
+ * Throws a clear Error if the core can't be fetched or loaded, so the UI
+ * can surface an actionable message instead of stalling.
  */
 export async function loadFFmpeg(onLog?: LogListener): Promise<FFmpeg> {
   if (ffmpegPromise) return ffmpegPromise;
@@ -47,13 +68,33 @@ export async function loadFFmpeg(onLog?: LogListener): Promise<FFmpeg> {
       ffmpeg.on("log", ({ message, type }) => onLog(message, type));
     }
 
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(
+    let coreURL: string;
+    let wasmURL: string;
+    try {
+      coreURL = await toBlobURL(
+        `${baseURL}/ffmpeg-core.js`,
+        "text/javascript",
+      );
+      wasmURL = await toBlobURL(
         `${baseURL}/ffmpeg-core.wasm`,
         "application/wasm",
-      ),
-    });
+      );
+    } catch (e) {
+      ffmpegPromise = null;
+      throw new Error(
+        "Could not download the ffmpeg engine (offline?). Subtitle extraction needs an internet connection for the first load. " +
+          (e as Error).message,
+      );
+    }
+
+    try {
+      await ffmpeg.load({ coreURL, wasmURL });
+    } catch (e) {
+      ffmpegPromise = null;
+      throw new Error(
+        "ffmpeg failed to start in this browser. " + (e as Error).message,
+      );
+    }
 
     return ffmpeg;
   })();
@@ -214,9 +255,4 @@ export async function extractSubtitleTrack(
       /* ignore */
     }
   }
-}
-
-/** Reset the cached ffmpeg instance (used for "start over"). */
-export function resetFFmpeg(): void {
-  ffmpegPromise = null;
 }
