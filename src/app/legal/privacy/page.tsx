@@ -47,10 +47,14 @@ export default function PrivacyPage() {
             sent to that CDN or any other server.
           </li>
           <li>
-            <strong>Audio transcription</strong> uses your browser&apos;s
-            built-in Web Speech API. The audio plays out loud through your
-            speakers and your microphone picks it up for the speech engine.
-            The transcription happens on your device — audio is not uploaded.
+            <strong>Audio transcription</strong> uses OpenAI&apos;s Whisper
+            speech-to-text model, running locally in your browser via{" "}
+            <code>transformers.js</code> and WebAssembly. The Whisper model
+            (~150&nbsp;MB) is fetched once from the public HuggingFace CDN and
+            cached by your browser. After that, transcription runs entirely
+            on your device — no microphone is needed, no audio is sent to any
+            server, and no internet connection is required after the first
+            load.
           </li>
           <li>
             <strong>Subtitle parsing &amp; editing</strong> (SRT, VTT, ASS) is
@@ -74,9 +78,11 @@ export default function PrivacyPage() {
         <p>
           The only external resources SubtitleLab fetches are the{" "}
           <code>ffmpeg.wasm</code> core files (from <code>unpkg.com</code>)
-          when you extract subtitles, and the <em>Donate</em> link points to
-          Buy&nbsp;Me&nbsp;a&nbsp;Coffee. No information about you or your
-          files is shared with these services.
+          when you first extract subtitles, and the Whisper speech model files
+          (from <code>huggingface.co</code>) when you first transcribe audio.
+          Both are cached by your browser after the first load. The{" "}
+          <em>Donate</em> link points to Buy&nbsp;Me&nbsp;a&nbsp;Coffee. No
+          information about you or your files is shared with these services.
         </p>
       </section>
 

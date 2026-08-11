@@ -8,20 +8,11 @@ import {
   Mic,
   Hand,
   Sparkles,
-  Volume2,
-  MicOff,
   Wifi,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { toast } from "sonner";
 import { formatBytes, reindex, type SubtitleEntry } from "@/lib/subtitle";
@@ -29,12 +20,9 @@ import { serializeSRT } from "@/lib/srt";
 import { serializeVTT } from "@/lib/vtt";
 import { downloadTextFile } from "@/lib/download";
 import {
-  AudioTranscriber,
-  isTranscriptionSupported,
-  TRANSCRIPTION_LANGUAGES,
-  type TranscriptionStatus,
-  type TranscriptionUpdate,
-} from "@/lib/transcribe";
+  isWhisperSupported,
+  transcribeWithWhisper,
+} from "@/lib/transcribe-whisper";
 import { getTranscriptionSizeLimit } from "@/lib/mobile";
 import { SubtitleList } from "@/components/subtitle-list";
 import { ManualCaptionMode } from "@/components/manual-caption-mode";
@@ -49,60 +37,87 @@ type SubMode = "auto" | "manual";
 
 export function CreateMode({ file, onRemove }: CreateModeProps) {
   const [subMode, setSubMode] = React.useState<SubMode>("auto");
-  const [lang, setLang] = React.useState("en-US");
-  const [status, setStatus] = React.useState<TranscriptionStatus>("idle");
-  const [progress, setProgress] = React.useState(0);
   const [entries, setEntries] = React.useState<SubtitleEntry[]>([]);
-  const [interim, setInterim] = React.useState("");
-  const [message, setMessage] = React.useState("");
+  const [status, setStatus] = React.useState<
+    "idle" | "decoding" | "loading-model" | "transcribing" | "done" | "error"
+  >("idle");
+  const [progress, setProgress] = React.useState(0);
+  const [statusMsg, setStatusMsg] = React.useState("");
   const [error, setError] = React.useState("");
-  const transcriberRef = React.useRef<AudioTranscriber | null>(null);
 
   const tooLarge = file.size > getTranscriptionSizeLimit();
-  const supported = isTranscriptionSupported();
-
-  React.useEffect(() => {
-    return () => {
-      transcriberRef.current?.dispose();
-      transcriberRef.current = null;
-    };
-  }, []);
+  const supported = isWhisperSupported();
 
   async function startTranscription() {
     setError("");
     setEntries([]);
-    setInterim("");
     setProgress(0);
-    setMessage("");
-    setStatus("preparing");
+    setStatusMsg("Decoding audio…");
+    setStatus("decoding");
 
-    const transcriber = new AudioTranscriber(lang, {
-      onUpdate: (u: TranscriptionUpdate) => {
-        setStatus(u.status);
-        setProgress(Math.round(u.progress * 100));
-        setEntries(reindex(u.entries));
-        setInterim(u.interim);
-        if (u.message) setMessage(u.message);
-      },
-      onEntry: () => {},
-      onError: (msg) => {
-        setError(msg);
-      },
-      onComplete: (finalEntries) => {
-        setEntries(reindex(finalEntries));
-        if (finalEntries.length > 0) {
-          toast.success("Transcription complete", {
-            description: `${finalEntries.length} subtitle entries generated.`,
-          });
-        }
-      },
-    });
-    transcriberRef.current = transcriber;
-    await transcriber.transcribe(file);
-  }
+    let phaseLabel = "Decoding audio…";
+    try {
+      const result = await transcribeWithWhisper(file, {
+        language: "en",
+        task: "transcribe",
+        onProgress: (info) => {
+          if (info.status === "decoding") {
+            phaseLabel = "Decoding audio…";
+            setProgress(0.05);
+          } else if (info.status === "decoded") {
+            phaseLabel = "Audio decoded";
+            setProgress(0.1);
+          } else if (
+            info.status === "initiate" ||
+            info.status === "download"
+          ) {
+            phaseLabel = info.name
+              ? `Downloading model: ${info.name.split("/").pop()}`
+              : "Downloading speech model…";
+            setProgress(
+              typeof info.progress === "number" ? 0.1 + info.progress * 0.5 : 0.2,
+            );
+          } else if (info.status === "progress" && info.loaded && info.total) {
+            phaseLabel = "Downloading speech model…";
+            setProgress(0.1 + (info.loaded / info.total) * 0.5);
+          } else if (info.status === "ready" || info.status === "loaded") {
+            phaseLabel = "Model ready — transcribing…";
+            setProgress(0.6);
+          } else if (info.status === "transcribing") {
+            phaseLabel = "Transcribing audio…";
+            setProgress(typeof info.progress === "number" ? info.progress : 0.7);
+          } else if (info.status === "done") {
+            phaseLabel = "Finalising…";
+            setProgress(0.95);
+          }
+          setStatusMsg(phaseLabel);
+          setStatus(
+            info.status === "transcribing" ? "transcribing" : "loading-model",
+          );
+        },
+      });
 
-  function stopTranscription() {
-    transcriberRef.current?.stop();
+      setEntries(reindex(result.entries));
+      setProgress(1);
+      setStatus("done");
+      setStatusMsg("");
+
+      if (result.entries.length > 0) {
+        toast.success("Transcription complete", {
+          description: `${result.entries.length} subtitle entries generated locally.`,
+        });
+      } else {
+        setError(
+          "No speech detected in this audio. Try Manual mode to caption by hand.",
+        );
+      }
+    } catch (e) {
+      setError((e as Error).message || "Transcription failed.");
+      setStatus("error");
+      toast.error("Transcription failed", {
+        description: (e as Error).message,
+      });
+    }
   }
 
   function download(format: "srt" | "vtt") {
@@ -121,13 +136,16 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
     toast.success(`Downloaded ${name}`);
   }
 
-  const running = status === "running" || status === "preparing";
+  const running =
+    status === "decoding" ||
+    status === "loading-model" ||
+    status === "transcribing";
 
   return (
     <div className="flex h-full flex-col gap-2.5 overflow-hidden">
       <FileInfoBar file={file} onRemove={onRemove} />
 
-      {/* Sub-mode toggle: Auto vs Manual */}
+      {/* Sub-mode toggle */}
       <div className="flex items-center justify-between gap-2">
         <ToggleGroup
           type="single"
@@ -137,7 +155,8 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
               if (running) return;
               setSubMode(v);
               setError("");
-              setMessage("");
+              setStatusMsg("");
+              setStatus("idle");
             }
           }}
           className="gap-1"
@@ -175,22 +194,14 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
         <>
           <div className="flex flex-col gap-2.5 rounded-lg border bg-muted/30 p-2.5">
             <div className="flex flex-wrap items-end justify-between gap-2">
-              <div className="flex flex-col gap-1.5">
+              <div>
                 <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Language
+                  Auto-transcription
                 </Label>
-                <Select value={lang} onValueChange={setLang} disabled={running}>
-                  <SelectTrigger className="h-8 w-[180px] px-2 py-0 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TRANSCRIPTION_LANGUAGES.map((l) => (
-                      <SelectItem key={l.code} value={l.code}>
-                        {l.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <p className="mt-1 flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="size-3" />
+                  Runs locally — no mic, no server
+                </p>
               </div>
 
               {!running ? (
@@ -206,56 +217,42 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
                 <Button
                   variant="outline"
                   className="h-9 border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:hover:bg-rose-950/30"
-                  onClick={stopTranscription}
+                  onClick={() => window.location.reload()}
                 >
-                  <Captions className="size-4" />
-                  Stop
+                  Cancel
                 </Button>
               )}
             </div>
 
+            {/* Privacy notice */}
             {status === "idle" && supported && !tooLarge && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-[11px] leading-relaxed text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300">
                 <p className="flex items-center gap-1.5 font-medium">
-                  <Volume2 className="size-3.5 shrink-0" />
-                  Audio plays out loud — the mic listens.
+                  <Sparkles className="size-3.5 shrink-0" />
+                  Truly private transcription.
                 </p>
-                <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-5 text-amber-700 dark:text-amber-400/90">
-                  <span className="inline-flex items-center gap-1">
-                    <MicOff className="size-3" /> Allow mic access
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <Volume2 className="size-3" /> Turn up your volume
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <Wifi className="size-3" /> Stay online
-                  </span>
+                <p className="mt-0.5 pl-5 text-emerald-700 dark:text-emerald-400/90">
+                  The Whisper speech model (~150&nbsp;MB) downloads once and runs
+                  entirely in your browser. Your audio never leaves your device.
                 </p>
-                <p className="mt-1 pl-5 text-amber-700/80 dark:text-amber-400/70">
-                  Mic blocked or no speech detected? Switch to{" "}
-                  <button
-                    type="button"
-                    className="font-medium underline underline-offset-2"
-                    onClick={() => setSubMode("manual")}
-                  >
-                    Manual mode
-                  </button>{" "}
-                  — it works without a mic.
+                <p className="mt-1 flex items-center gap-1.5 pl-5 text-emerald-700/80 dark:text-emerald-400/70">
+                  <Wifi className="size-3" />
+                  Only needed for the first load — cached afterwards.
                 </p>
               </div>
             )}
 
             {!supported && (
               <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
-                Web Speech API isn&apos;t available in this browser. Switch to{" "}
+                Your browser doesn&apos;t support the Web Audio API. Switch to{" "}
                 <button
                   type="button"
                   className="font-medium underline underline-offset-2"
                   onClick={() => setSubMode("manual")}
                 >
                   Manual mode
-                </button>{" "}
-                to create subtitles by typing.
+                </button>
+                .
               </p>
             )}
 
@@ -284,17 +281,12 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
             {running && (
               <div className="flex flex-col gap-1">
                 <Progress
-                  value={progress}
+                  value={Math.round(progress * 100)}
                   className="h-1.5 bg-emerald-100 dark:bg-emerald-950/50"
                 />
                 <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Loader2 className="size-3 animate-spin text-emerald-500" />
-                  {status === "preparing"
-                    ? "Preparing media…"
-                    : `Transcribing · ${progress}%`}
-                  {interim && (
-                    <span className="truncate italic">“{interim}”</span>
-                  )}
+                  {statusMsg} {Math.round(progress * 100)}%
                 </p>
               </div>
             )}
@@ -302,15 +294,8 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
             {status === "done" && entries.length > 0 && (
               <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
                 <Sparkles className="size-3" />
-                Generated {entries.length} entries. Edit above, then download.
-              </p>
-            )}
-
-            {status === "done" && entries.length === 0 && (
-              <p className="flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400">
-                <Sparkles className="size-3" />
-                {message || "No speech was transcribed."} Switch to Manual mode
-                to create subtitles by typing.
+                Generated {entries.length} entries locally. Edit above, then
+                download.
               </p>
             )}
           </div>
@@ -320,7 +305,7 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
               entries={entries}
               onChange={(next) => setEntries(reindex(next))}
               className="min-h-0 flex-1"
-              emptyLabel="Listening…"
+              emptyLabel="Click Transcribe Audio to generate subtitles locally."
             />
           </div>
         </>
@@ -347,5 +332,25 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
         </Button>
       </div>
     </div>
+  );
+}
+
+// Local label component (kept here to avoid an extra import cycle).
+function Label({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={
+        "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground " +
+        (className || "")
+      }
+    >
+      {children}
+    </span>
   );
 }
