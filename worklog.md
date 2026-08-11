@@ -142,3 +142,31 @@ Work Log:
 Stage Summary:
 - Vercel build will now succeed — `next build` is the only build step, no standalone cp.
 - Commit: https://github.com/JeffreyHamilton6399/subtitlelab/commit/ba00fd4
+
+---
+Task ID: 21-25
+Agent: Z.ai Code (main)
+Task: Fix privacy contradiction — replace Web Speech API (sends audio to Google) with truly local Whisper transcription.
+
+Work Log:
+- User correctly pointed out: the Web Speech API needs internet and sends audio to a server, which breaks the "100% private, no server" promise.
+- Verified extraction still works: uploaded test-video.mkv → ffmpeg found track → extracted valid SRT ("Hello from the test video." / "Subtitle extraction works.").
+- Installed @huggingface/transformers@4.2.0.
+- New src/lib/transcribe-whisper.ts: uses Xenova/whisper-tiny.en model via transformers.js.
+  - decodeAudioFile(): uses Web Audio API + OfflineAudioContext to decode any audio/video File into 16kHz mono Float32Array.
+  - transcribeWithWhisper(): loads Whisper pipeline (lazy, cached), runs it on the audio, returns timestamped SubtitleEntry[] (using Whisper's chunk timestamps).
+  - 100% local: no mic, no server, no third-party API. Model downloads once from huggingface.co (~150MB fp32) and is cached by the browser.
+  - Hit a quantization bug with default dtype (qdq_actions.cc error); fixed by using dtype: 'fp32' (non-quantized, more compatible).
+- Rewrote create-mode.tsx: Auto mode now uses Whisper. Privacy notice: "Truly private transcription — runs in your browser, audio never leaves your device." Progress callback handles decoding/model-download/transcribing phases with percentage. Manual mode unchanged (no-download fallback).
+- Removed old transcribe.ts (Web Speech API) entirely.
+- Updated /legal/privacy: transcription now described as local Whisper model via transformers.js; third-party resources section mentions huggingface.co model download.
+- Agent Browser end-to-end verification:
+  - Extraction: test-video.mkv → valid SRT extracted (downloaded, content confirmed).
+  - Transcription: speech.mp3 (9s espeak-ng synthesized speech "Hello world. This is a test of the subtitle lab transcription...") → Whisper transcribed to "Hello World! This is a test on the subtitle amtrance encryption. Subtitle are extracted from video and audio file entirely in your browser." → valid SRT downloaded. No mic, no server, no errors.
+- bun run lint clean, bun run build exits 0.
+- Committed (a3a0ae0) and pushed to GitHub main.
+
+Stage Summary:
+- BOTH features now work end-to-end: Extract (ffmpeg.wasm, local) + Create→Auto (Whisper, local) + Create→Manual (no model download, by hand).
+- Privacy promise now TRUE: no mic needed, no audio sent anywhere, no server. The only network use is the one-time model/engine download (cached after).
+- Pushed: https://github.com/JeffreyHamilton6399/subtitlelab/commit/a3a0ae0
