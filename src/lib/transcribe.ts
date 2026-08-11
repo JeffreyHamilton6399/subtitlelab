@@ -1,6 +1,7 @@
 // Web Speech API transcription — creates timed subtitles from an audio/video file.
-// 100% client-side. Plays the media element audibly so the SpeechRecognition
-// engine can transcribe it, tracking currentTime to timestamp each result.
+// 100% client-side. The media plays audibly so the SpeechRecognition engine
+// (which listens to the microphone) can transcribe it, tracking currentTime to
+// timestamp each final result.
 import type { SubtitleEntry } from "./subtitle";
 
 // --- Minimal Web Speech API typings (not in standard TS DOM lib) ---
@@ -89,19 +90,31 @@ export type TranscriptionStatus =
   | "done"
   | "error";
 
+export interface TranscriptionUpdate {
+  status: TranscriptionStatus;
+  entries: SubtitleEntry[];
+  progress: number;
+  interim: string;
+  message?: string;
+}
+
 export interface TranscriptionCallbacks {
-  onStatus?: (status: TranscriptionStatus) => void;
-  onProgress?: (ratio: number, currentMs: number, totalMs: number) => void;
+  onUpdate?: (update: TranscriptionUpdate) => void;
   onEntry?: (entry: SubtitleEntry) => void;
-  onInterim?: (text: string) => void;
   onError?: (message: string) => void;
   onComplete?: (entries: SubtitleEntry[]) => void;
 }
 
 const MAX_CHARS_PER_ENTRY = 84;
-const MAX_GAP_MS = 1500;
 
-/** Manage transcription of a single media file via the Web Speech API. */
+/**
+ * Manage transcription of a single media file via the Web Speech API.
+ *
+ * Important: the Web Speech API listens to the **microphone**, not to file
+ * audio directly. For transcription to work, the media must play audibly out
+ * loud through the speakers so the microphone can pick it up. Remind the user
+ * to turn up their volume and allow microphone access.
+ */
 export class AudioTranscriber {
   private mediaEl: HTMLMediaElement | null = null;
   private objectUrl: string | null = null;
@@ -109,10 +122,14 @@ export class AudioTranscriber {
   private entries: SubtitleEntry[] = [];
   private status: TranscriptionStatus = "idle";
   private currentSegmentStartMs = 0;
-  private lastFinalMs = 0;
   private stopped = false;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private noSpeechCount = 0;
+  private warnedNoSpeech = false;
   private readonly lang: string;
   private readonly callbacks: TranscriptionCallbacks;
+  private progress = 0;
+  private interim = "";
 
   constructor(lang: string, callbacks: TranscriptionCallbacks) {
     this.lang = lang || "en-US";
@@ -122,10 +139,9 @@ export class AudioTranscriber {
   async transcribe(file: File): Promise<void> {
     const Ctor = getSpeechRecognition();
     if (!Ctor) {
-      this.callbacks.onError?.(
+      this.fail(
         "Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.",
       );
-      this.setStatus("error");
       return;
     }
 
@@ -133,16 +149,21 @@ export class AudioTranscriber {
     this.stopped = false;
     this.entries = [];
     this.currentSegmentStartMs = 0;
-    this.lastFinalMs = 0;
+    this.noSpeechCount = 0;
+    this.warnedNoSpeech = false;
+    this.progress = 0;
+    this.interim = "";
 
-    // Create media element (audio-only path also works with <video>).
+    // Create media element. Audio MUST play audibly (not muted) so the mic
+    // can pick it up.
     this.objectUrl = URL.createObjectURL(file);
     const el = file.type.startsWith("audio")
       ? document.createElement("audio")
       : document.createElement("video");
     el.src = this.objectUrl;
     el.preload = "auto";
-    el.crossOrigin = "anonymous";
+    el.muted = false;
+    el.volume = 1;
     el.style.position = "fixed";
     el.style.left = "-9999px";
     el.style.top = "-9999px";
@@ -160,26 +181,10 @@ export class AudioTranscriber {
     recognition.maxAlternatives = 1;
 
     recognition.onresult = (event) => this.handleResult(event);
-    recognition.onerror = (event) => {
-      if (event.error === "no-speech" || event.error === "aborted") return;
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        this.callbacks.onError?.(
-          "Microphone access was blocked. Please allow microphone access to transcribe audio.",
-        );
-        this.setStatus("error");
-      } else {
-        this.callbacks.onError?.(`Recognition error: ${event.error}`);
-      }
-    };
-    recognition.onend = () => {
-      // Auto-restart while media still playing.
-      if (!this.stopped && this.mediaEl && !this.mediaEl.ended) {
-        try {
-          recognition.start();
-        } catch {
-          /* already started */
-        }
-      }
+    recognition.onerror = (event) => this.handleError(event);
+    recognition.onend = () => this.handleEnd();
+    recognition.onstart = () => {
+      this.noSpeechCount = 0;
     };
     this.recognition = recognition;
 
@@ -189,18 +194,21 @@ export class AudioTranscriber {
 
     el.addEventListener("timeupdate", () => {
       const currentMs = (el.currentTime || 0) * 1000;
-      const ratio = durationMs > 0 ? Math.min(1, currentMs / durationMs) : 0;
-      this.callbacks.onProgress?.(ratio, currentMs, durationMs);
+      this.progress =
+        durationMs > 0 ? Math.min(0.999, currentMs / durationMs) : 0;
+      this.emitUpdate();
     });
     el.addEventListener("ended", () => {
+      this.progress = 1;
       this.finish();
     });
     el.addEventListener("error", () => {
-      this.callbacks.onError?.("Could not play the media file for transcription.");
-      this.setStatus("error");
+      this.fail("Could not decode this media file. Try a different format.");
     });
 
     this.setStatus("running");
+    this.emitUpdate();
+
     try {
       recognition.start();
     } catch {
@@ -211,10 +219,9 @@ export class AudioTranscriber {
     try {
       await el.play();
     } catch {
-      this.callbacks.onError?.(
-        "Playback was blocked. Please click Transcribe again to allow audio playback.",
+      this.fail(
+        "Playback was blocked. Click Transcribe again to allow audio playback.",
       );
-      this.setStatus("error");
     }
   }
 
@@ -226,7 +233,6 @@ export class AudioTranscriber {
         resolve();
       };
       el.addEventListener("loadeddata", onReady);
-      // Fallback timeout.
       setTimeout(() => {
         el.removeEventListener("loadeddata", onReady);
         resolve();
@@ -246,17 +252,75 @@ export class AudioTranscriber {
         const text = transcript.trim();
         if (!text) continue;
         this.pushEntry(text, this.currentSegmentStartMs || currentMs, currentMs);
-        this.lastFinalMs = currentMs;
         this.currentSegmentStartMs = currentMs;
+        this.noSpeechCount = 0;
       } else {
         interimText += transcript;
       }
     }
-    if (interimText) this.callbacks.onInterim?.(interimText);
+    this.interim = interimText;
+    this.emitUpdate();
+  }
+
+  private handleError(event: SpeechRecognitionErrorEvent): void {
+    switch (event.error) {
+      case "no-speech":
+        // Recognition ended because it didn't hear anything. Track this; if it
+        // keeps happening with zero results, warn the user.
+        this.noSpeechCount++;
+        if (
+          this.noSpeechCount >= 4 &&
+          !this.warnedNoSpeech &&
+          this.entries.length === 0
+        ) {
+          this.warnedNoSpeech = true;
+          this.callbacks.onError?.(
+            "No speech detected. Make sure your volume is up so the mic can hear the audio, and that you're in a quiet environment.",
+          );
+        }
+        break;
+      case "aborted":
+        break;
+      case "not-allowed":
+      case "service-not-allowed":
+        this.fail(
+          "Microphone access was blocked. Allow microphone access in your browser to transcribe audio.",
+        );
+        break;
+      case "audio-capture":
+        this.fail("No microphone was found. Connect a mic to transcribe audio.");
+        break;
+      case "network":
+        this.fail(
+          "Speech recognition lost its network connection (the Web Speech API needs internet for its model).",
+        );
+        break;
+      default:
+        // other transient errors — don't abort, recognition will restart
+        break;
+    }
+  }
+
+  private handleEnd(): void {
+    // Auto-restart while media still playing. Use a small delay to avoid
+    // tight restart loops.
+    if (this.stopped) return;
+    if (this.restartTimer) clearTimeout(this.restartTimer);
+    this.restartTimer = setTimeout(() => {
+      if (this.stopped || !this.recognition || !this.mediaEl) return;
+      if (this.mediaEl.ended) {
+        this.finish();
+        return;
+      }
+      try {
+        this.recognition.start();
+      } catch {
+        /* already started */
+      }
+    }, 250);
   }
 
   private pushEntry(text: string, startMs: number, endMs: number): void {
-    // Auto-split overly long transcripts into multiple timed entries.
     const words = text.split(/\s+/);
     if (text.length <= MAX_CHARS_PER_ENTRY) {
       this.addEntry(words.join(" "), startMs, endMs);
@@ -285,9 +349,7 @@ export class AudioTranscriber {
   }
 
   private addEntry(text: string, startMs: number, endMs: number): void {
-    if (endMs - startMs > MAX_GAP_MS && endMs <= startMs) {
-      endMs = startMs + 1500;
-    }
+    if (endMs <= startMs) endMs = startMs + 1500;
     const entry: SubtitleEntry = {
       index: this.entries.length + 1,
       start: Math.round(startMs),
@@ -296,11 +358,30 @@ export class AudioTranscriber {
     };
     this.entries.push(entry);
     this.callbacks.onEntry?.(entry);
+    this.emitUpdate();
   }
 
   private setStatus(status: TranscriptionStatus): void {
     this.status = status;
-    this.callbacks.onStatus?.(status);
+  }
+
+  private emitUpdate(message?: string): void {
+    this.callbacks.onUpdate?.({
+      status: this.status,
+      entries: [...this.entries],
+      progress: this.progress,
+      interim: this.interim,
+      message,
+    });
+  }
+
+  private fail(message: string): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.setStatus("error");
+    this.callbacks.onError?.(message);
+    this.emitUpdate(message);
+    this.cleanup();
   }
 
   getStatus(): TranscriptionStatus {
@@ -319,6 +400,7 @@ export class AudioTranscriber {
       /* ignore */
     }
     this.setStatus("paused");
+    this.emitUpdate();
   }
 
   resume(): void {
@@ -331,9 +413,11 @@ export class AudioTranscriber {
       /* ignore */
     }
     this.setStatus("running");
+    this.emitUpdate();
   }
 
   stop(): void {
+    if (this.stopped) return;
     this.stopped = true;
     try {
       this.recognition?.stop();
@@ -352,12 +436,31 @@ export class AudioTranscriber {
     } catch {
       /* ignore */
     }
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     this.setStatus("done");
+
+    if (this.entries.length === 0) {
+      this.callbacks.onError?.(
+        "No speech was transcribed. Make sure the audio plays out loud, your microphone can hear it, and you're in a quiet environment. The Web Speech API needs an internet connection for its model.",
+      );
+    }
     this.callbacks.onComplete?.(this.entries);
+    this.emitUpdate(
+      this.entries.length === 0
+        ? "No speech transcribed"
+        : `Generated ${this.entries.length} entries`,
+    );
     this.cleanup();
   }
 
   private cleanup(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     if (this.mediaEl) {
       this.mediaEl.pause();
       this.mediaEl.src = "";

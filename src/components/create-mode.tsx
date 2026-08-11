@@ -9,6 +9,9 @@ import {
   Play,
   Square,
   Sparkles,
+  Volume2,
+  MicOff,
+  Wifi,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -30,6 +33,7 @@ import {
   isTranscriptionSupported,
   TRANSCRIPTION_LANGUAGES,
   type TranscriptionStatus,
+  type TranscriptionUpdate,
 } from "@/lib/transcribe";
 import { getTranscriptionSizeLimit } from "@/lib/mobile";
 import { SubtitleList } from "@/components/subtitle-list";
@@ -46,6 +50,7 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
   const [progress, setProgress] = React.useState(0);
   const [entries, setEntries] = React.useState<SubtitleEntry[]>([]);
   const [interim, setInterim] = React.useState("");
+  const [message, setMessage] = React.useState("");
   const [error, setError] = React.useState("");
   const transcriberRef = React.useRef<AudioTranscriber | null>(null);
 
@@ -64,24 +69,31 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
     setEntries([]);
     setInterim("");
     setProgress(0);
+    setMessage("");
     setStatus("preparing");
 
     const transcriber = new AudioTranscriber(lang, {
-      onStatus: setStatus,
-      onProgress: (ratio) => setProgress(Math.round(ratio * 100)),
-      onEntry: (entry) => {
-        setEntries((prev) => reindex([...prev, entry]));
+      onUpdate: (u: TranscriptionUpdate) => {
+        setStatus(u.status);
+        setProgress(Math.round(u.progress * 100));
+        setEntries(reindex(u.entries));
+        setInterim(u.interim);
+        if (u.message) setMessage(u.message);
       },
-      onInterim: (text) => setInterim(text),
+      onEntry: () => {
+        // entries handled via onUpdate
+      },
       onError: (msg) => {
         setError(msg);
-        toast.error("Transcription error", { description: msg });
+        toast.error("Transcription problem", { description: msg });
       },
       onComplete: (finalEntries) => {
         setEntries(reindex(finalEntries));
-        toast.success("Transcription complete", {
-          description: `${finalEntries.length} subtitle entries generated.`,
-        });
+        if (finalEntries.length > 0) {
+          toast.success("Transcription complete", {
+            description: `${finalEntries.length} subtitle entries generated.`,
+          });
+        }
       },
     });
     transcriberRef.current = transcriber;
@@ -156,6 +168,27 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
           )}
         </div>
 
+        {/* How it works notice */}
+        {status === "idle" && supported && !tooLarge && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
+            <p className="flex items-center gap-1.5 font-medium">
+              <Volume2 className="size-3.5 shrink-0" />
+              Audio plays out loud — the mic listens.
+            </p>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-5 text-amber-700 dark:text-amber-400/90">
+              <span className="inline-flex items-center gap-1">
+                <MicOff className="size-3" /> Allow mic access
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Volume2 className="size-3" /> Turn up your volume
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Wifi className="size-3" /> Stay online
+              </span>
+            </p>
+          </div>
+        )}
+
         {!supported && (
           <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
             Web Speech API isn&apos;t available in this browser. Use Chrome,
@@ -167,6 +200,12 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
           <p className="rounded-md bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/30 dark:text-rose-400">
             File is {formatBytes(file.size)}. Limit is{" "}
             {formatBytes(getTranscriptionSizeLimit())} on this device.
+          </p>
+        )}
+
+        {error && (
+          <p className="rounded-md bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/30 dark:text-rose-400">
+            {error}
           </p>
         )}
 
@@ -194,6 +233,13 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
             Generated {entries.length} entries. Edit above, then download.
           </p>
         )}
+
+        {status === "done" && entries.length === 0 && (
+          <p className="flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400">
+            <Sparkles className="size-3" />
+            {message || "No speech was transcribed."}
+          </p>
+        )}
       </div>
 
       {/* Editable results */}
@@ -207,8 +253,8 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
               generate timed subtitles from this file&apos;s audio.
             </p>
             <p className="max-w-xs text-[11px] text-muted-foreground">
-              The file plays audibly so the speech engine can hear it. Keep your
-              tab open and your mic available.
+              The file plays audibly so the speech engine can hear it through
+              your microphone. Keep your tab open.
             </p>
           </div>
         ) : (
