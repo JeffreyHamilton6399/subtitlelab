@@ -140,10 +140,19 @@ export async function transcribeWithWhisper(
   const pipe = await getPipeline(onProgress);
   onProgress?.({ status: "transcribing", progress: 0.15 });
 
-  // 3. Run Whisper with timestamp chunking (return_timestamps = true).
-  // For multilingual models, set language + task; for .en-only models these
-  // are ignored.
-  const output = await pipe(audio);
+  // 3. Run Whisper with timestamp chunking enabled. This is what makes the
+  // output come back as many short sentence/phrase-level chunks (each with
+  // its own start/end timestamp) instead of one giant block of text.
+  // NOTE: the .en model is English-only, so it does not accept
+  // `language`/`task` (passing them throws). Those are only for multilingual.
+  const pipeOptions: Record<string, unknown> = {
+    return_timestamps: true,
+    chunk_length_s: 30,
+    stride_length_s: 5,
+  };
+  void language;
+  void task;
+  const output = await pipe(audio, pipeOptions);
   onProgress?.({ status: "done", progress: 1 });
 
   const rawText = (output.text || "").trim();
@@ -182,10 +191,80 @@ export async function transcribeWithWhisper(
       : [];
   }
 
-  // Filter out empty-text entries.
+  // Filter out empty-text entries, then split any entry that is still too
+  // long to read as a single subtitle (more than ~84 chars or multiple
+  // sentences) into shorter ones, distributing the duration evenly.
   entries = entries.filter((e) => e.text.length > 0);
+  entries = splitLongEntries(entries, 84);
 
   return { entries: reindex(entries), rawText };
+}
+
+/**
+ * Split entries whose text exceeds maxChars (or contains multiple sentences)
+ * into multiple shorter entries, distributing the duration evenly.
+ */
+function splitLongEntries(
+  entries: SubtitleEntry[],
+  maxChars = 84,
+): SubtitleEntry[] {
+  const out: SubtitleEntry[] = [];
+  for (const e of entries) {
+    const segments = splitIntoSegments(e.text, maxChars);
+    if (segments.length <= 1) {
+      out.push({ ...e });
+      continue;
+    }
+    const total = Math.max(e.end - e.start, 1);
+    const per = total / segments.length;
+    segments.forEach((seg, i) => {
+      out.push({
+        index: 0,
+        start: Math.round(e.start + per * i),
+        end: Math.round(e.start + per * (i + 1)),
+        text: seg,
+      });
+    });
+  }
+  return out;
+}
+
+/** Split text into subtitle-length segments on sentence/clause boundaries. */
+function splitIntoSegments(text: string, maxChars: number): string[] {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= maxChars) return [cleaned];
+  // Split on sentence/clause punctuation, keeping the punctuation.
+  const parts = cleaned.split(/(?<=[.!?])\s+|,\s+|;\s+/).filter(Boolean);
+  const segments: string[] = [];
+  let current = "";
+  for (const p of parts) {
+    const candidate = current ? `${current} ${p}`.trim() : p;
+    if (candidate.length > maxChars && current) {
+      segments.push(current);
+      // If the part itself is too long, hard-split on words.
+      if (p.length > maxChars) {
+        const words = p.split(" ");
+        let buf = "";
+        for (const w of words) {
+          const c = buf ? `${buf} ${w}` : w;
+          if (c.length > maxChars && buf) {
+            segments.push(buf);
+            buf = w;
+          } else {
+            buf = c;
+          }
+        }
+        if (buf) current = buf;
+        else current = "";
+      } else {
+        current = p;
+      }
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) segments.push(current);
+  return segments.length ? segments : [cleaned];
 }
 
 export function isWhisperSupported(): boolean {
