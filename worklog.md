@@ -83,3 +83,24 @@ Stage Summary:
 - Header now matches reference design (Donate + gear dropdown with theme/Legal/GitHub).
 - Transcription now gives clear feedback when no speech is detected instead of silently producing nothing.
 - Code pushed to GitHub: https://github.com/JeffreyHamilton6399/subtitlelab — ready to import into Vercel (no env vars needed).
+
+---
+Task ID: 14-15
+Agent: Z.ai Code (main)
+Task: Fix "No speech was transcribed" — Web Speech API silently fails in sandboxed preview.
+
+Work Log:
+- Root cause: Web Speech API listens to the MIC (not file audio). In the preview iframe, mic is blocked / unavailable, so recognition ran and produced zero entries with no clear feedback.
+- transcribe.ts: added checkMicrophonePermission() via getUserMedia — pre-checks mic BEFORE playing media, fails fast with a clear message. Added isInsideIframe() to detect embedded preview and tailor the message. transcribe() now calls the pre-check first; if denied/unavailable, returns immediately with "Switch to Manual mode" guidance.
+- New src/components/manual-caption-mode.tsx: reliable caption creation WITHOUT a mic. Renders a visible native <audio>/<video> player + Play/Pause + "Add subtitle at playhead" button. Clicking it inserts an entry at currentTime (+2.5s default end), pauses for typing. Reuses the shared SubtitleList for inline editing.
+- Rewrote create-mode.tsx: Auto/Manual ToggleGroup at top; shared `entries` state so switching modes preserves work. Every auto-mode error/empty-state now includes a "Switch to Manual mode →" link. Kept language selector + progress + interim text for auto mode.
+- Agent Browser verification (with a generated 3s test mp3):
+  - Upload audio → Create tab auto-selected, Auto/Manual toggle visible.
+  - Manual mode: native audio player renders, Play works, "Add subtitle at playhead" inserts entry at 1.955s→4.455s with empty text field, typing + Download SRT works, no errors.
+  - Auto mode: clicking Transcribe Audio triggers mic pre-check → immediate "No microphone is available... Switch to Manual mode" message (instead of silent 60s failure). The Manual-mode link is clickable.
+  - Single-screen layout holds in Manual mode (docH=vh=577, not scrollable). No console/runtime errors. Lint clean.
+- Committed (0a295f7) and pushed to GitHub main.
+
+Stage Summary:
+- Create mode is now reliably usable in ANY environment: Manual mode needs no mic/internet and always works; Auto mode fails fast with actionable guidance when the mic is blocked.
+- Pushed: https://github.com/JeffreyHamilton6399/subtitlelab/commit/0a295f7
