@@ -6,8 +6,7 @@ import {
   Download,
   Loader2,
   Mic,
-  Play,
-  Square,
+  Hand,
   Sparkles,
   Volume2,
   MicOff,
@@ -23,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { toast } from "sonner";
 import { formatBytes, reindex, type SubtitleEntry } from "@/lib/subtitle";
 import { serializeSRT } from "@/lib/srt";
@@ -37,6 +37,7 @@ import {
 } from "@/lib/transcribe";
 import { getTranscriptionSizeLimit } from "@/lib/mobile";
 import { SubtitleList } from "@/components/subtitle-list";
+import { ManualCaptionMode } from "@/components/manual-caption-mode";
 import { FileInfoBar } from "@/components/extract-mode";
 
 interface CreateModeProps {
@@ -44,7 +45,10 @@ interface CreateModeProps {
   onRemove: () => void;
 }
 
+type SubMode = "auto" | "manual";
+
 export function CreateMode({ file, onRemove }: CreateModeProps) {
+  const [subMode, setSubMode] = React.useState<SubMode>("auto");
   const [lang, setLang] = React.useState("en-US");
   const [status, setStatus] = React.useState<TranscriptionStatus>("idle");
   const [progress, setProgress] = React.useState(0);
@@ -80,12 +84,9 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
         setInterim(u.interim);
         if (u.message) setMessage(u.message);
       },
-      onEntry: () => {
-        // entries handled via onUpdate
-      },
+      onEntry: () => {},
       onError: (msg) => {
         setError(msg);
-        toast.error("Transcription problem", { description: msg });
       },
       onComplete: (finalEntries) => {
         setEntries(reindex(finalEntries));
@@ -126,146 +127,204 @@ export function CreateMode({ file, onRemove }: CreateModeProps) {
     <div className="flex h-full flex-col gap-2.5 overflow-hidden">
       <FileInfoBar file={file} onRemove={onRemove} />
 
-      {/* Controls */}
-      <div className="flex flex-col gap-2.5 rounded-lg border bg-muted/30 p-2.5">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Language
-            </Label>
-            <Select value={lang} onValueChange={setLang} disabled={running}>
-              <SelectTrigger className="h-8 w-[180px] px-2 py-0 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TRANSCRIPTION_LANGUAGES.map((l) => (
-                  <SelectItem key={l.code} value={l.code}>
-                    {l.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      {/* Sub-mode toggle: Auto vs Manual */}
+      <div className="flex items-center justify-between gap-2">
+        <ToggleGroup
+          type="single"
+          value={subMode}
+          onValueChange={(v) => {
+            if (v === "auto" || v === "manual") {
+              if (running) return;
+              setSubMode(v);
+              setError("");
+              setMessage("");
+            }
+          }}
+          className="gap-1"
+        >
+          <ToggleGroupItem
+            value="auto"
+            className="h-8 gap-1.5 px-3 text-xs"
+            disabled={running}
+          >
+            <Mic className="size-3.5" />
+            Auto
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="manual"
+            className="h-8 gap-1.5 px-3 text-xs"
+            disabled={running}
+          >
+            <Hand className="size-3.5" />
+            Manual
+          </ToggleGroupItem>
+        </ToggleGroup>
 
-          {!running ? (
-            <Button
-              className="h-9 bg-emerald-600 text-white shadow-xs hover:bg-emerald-700"
-              onClick={startTranscription}
-              disabled={!supported || tooLarge}
-            >
-              <Mic className="size-4" />
-              Transcribe Audio
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              className="h-9 border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:hover:bg-rose-950/30"
-              onClick={stopTranscription}
-            >
-              <Square className="size-4" />
-              Stop
-            </Button>
-          )}
-        </div>
+        <span className="text-[11px] text-muted-foreground">
+          {entries.length} entries
+        </span>
+      </div>
 
-        {/* How it works notice */}
-        {status === "idle" && supported && !tooLarge && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
-            <p className="flex items-center gap-1.5 font-medium">
-              <Volume2 className="size-3.5 shrink-0" />
-              Audio plays out loud — the mic listens.
-            </p>
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-5 text-amber-700 dark:text-amber-400/90">
-              <span className="inline-flex items-center gap-1">
-                <MicOff className="size-3" /> Allow mic access
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Volume2 className="size-3" /> Turn up your volume
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Wifi className="size-3" /> Stay online
-              </span>
-            </p>
-          </div>
-        )}
+      {subMode === "manual" ? (
+        <ManualCaptionMode
+          file={file}
+          entries={entries}
+          onChange={setEntries}
+        />
+      ) : (
+        <>
+          <div className="flex flex-col gap-2.5 rounded-lg border bg-muted/30 p-2.5">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Language
+                </Label>
+                <Select value={lang} onValueChange={setLang} disabled={running}>
+                  <SelectTrigger className="h-8 w-[180px] px-2 py-0 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TRANSCRIPTION_LANGUAGES.map((l) => (
+                      <SelectItem key={l.code} value={l.code}>
+                        {l.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-        {!supported && (
-          <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
-            Web Speech API isn&apos;t available in this browser. Use Chrome,
-            Edge, or Safari to transcribe.
-          </p>
-        )}
-
-        {tooLarge && (
-          <p className="rounded-md bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/30 dark:text-rose-400">
-            File is {formatBytes(file.size)}. Limit is{" "}
-            {formatBytes(getTranscriptionSizeLimit())} on this device.
-          </p>
-        )}
-
-        {error && (
-          <p className="rounded-md bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/30 dark:text-rose-400">
-            {error}
-          </p>
-        )}
-
-        {running && (
-          <div className="flex flex-col gap-1">
-            <Progress
-              value={progress}
-              className="h-1.5 bg-emerald-100 dark:bg-emerald-950/50"
-            />
-            <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <Loader2 className="size-3 animate-spin text-emerald-500" />
-              {status === "preparing"
-                ? "Preparing media…"
-                : `Transcribing · ${progress}%`}
-              {interim && (
-                <span className="truncate italic">“{interim}”</span>
+              {!running ? (
+                <Button
+                  className="h-9 bg-emerald-600 text-white shadow-xs hover:bg-emerald-700"
+                  onClick={startTranscription}
+                  disabled={!supported || tooLarge}
+                >
+                  <Mic className="size-4" />
+                  Transcribe Audio
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="h-9 border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-900 dark:hover:bg-rose-950/30"
+                  onClick={stopTranscription}
+                >
+                  <Captions className="size-4" />
+                  Stop
+                </Button>
               )}
-            </p>
+            </div>
+
+            {status === "idle" && supported && !tooLarge && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
+                <p className="flex items-center gap-1.5 font-medium">
+                  <Volume2 className="size-3.5 shrink-0" />
+                  Audio plays out loud — the mic listens.
+                </p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-5 text-amber-700 dark:text-amber-400/90">
+                  <span className="inline-flex items-center gap-1">
+                    <MicOff className="size-3" /> Allow mic access
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Volume2 className="size-3" /> Turn up your volume
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Wifi className="size-3" /> Stay online
+                  </span>
+                </p>
+                <p className="mt-1 pl-5 text-amber-700/80 dark:text-amber-400/70">
+                  Mic blocked or no speech detected? Switch to{" "}
+                  <button
+                    type="button"
+                    className="font-medium underline underline-offset-2"
+                    onClick={() => setSubMode("manual")}
+                  >
+                    Manual mode
+                  </button>{" "}
+                  — it works without a mic.
+                </p>
+              </div>
+            )}
+
+            {!supported && (
+              <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+                Web Speech API isn&apos;t available in this browser. Switch to{" "}
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-2"
+                  onClick={() => setSubMode("manual")}
+                >
+                  Manual mode
+                </button>{" "}
+                to create subtitles by typing.
+              </p>
+            )}
+
+            {tooLarge && (
+              <p className="rounded-md bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/30 dark:text-rose-400">
+                File is {formatBytes(file.size)}. Limit is{" "}
+                {formatBytes(getTranscriptionSizeLimit())} on this device.
+              </p>
+            )}
+
+            {error && (
+              <div className="rounded-md bg-rose-50 px-2.5 py-2 text-[11px] leading-relaxed text-rose-700 dark:bg-rose-950/30 dark:text-rose-400">
+                <p>{error}</p>
+                <p className="mt-1">
+                  <button
+                    type="button"
+                    className="font-medium underline underline-offset-2"
+                    onClick={() => setSubMode("manual")}
+                  >
+                    Switch to Manual mode →
+                  </button>
+                </p>
+              </div>
+            )}
+
+            {running && (
+              <div className="flex flex-col gap-1">
+                <Progress
+                  value={progress}
+                  className="h-1.5 bg-emerald-100 dark:bg-emerald-950/50"
+                />
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Loader2 className="size-3 animate-spin text-emerald-500" />
+                  {status === "preparing"
+                    ? "Preparing media…"
+                    : `Transcribing · ${progress}%`}
+                  {interim && (
+                    <span className="truncate italic">“{interim}”</span>
+                  )}
+                </p>
+              </div>
+            )}
+
+            {status === "done" && entries.length > 0 && (
+              <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+                <Sparkles className="size-3" />
+                Generated {entries.length} entries. Edit above, then download.
+              </p>
+            )}
+
+            {status === "done" && entries.length === 0 && (
+              <p className="flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400">
+                <Sparkles className="size-3" />
+                {message || "No speech was transcribed."} Switch to Manual mode
+                to create subtitles by typing.
+              </p>
+            )}
           </div>
-        )}
 
-        {status === "done" && entries.length > 0 && (
-          <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
-            <Sparkles className="size-3" />
-            Generated {entries.length} entries. Edit above, then download.
-          </p>
-        )}
-
-        {status === "done" && entries.length === 0 && (
-          <p className="flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400">
-            <Sparkles className="size-3" />
-            {message || "No speech was transcribed."}
-          </p>
-        )}
-      </div>
-
-      {/* Editable results */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {entries.length === 0 && !running ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 text-center">
-            <Play className="size-6 text-muted-foreground" />
-            <p className="text-sm font-medium">No subtitles yet</p>
-            <p className="max-w-xs text-xs text-muted-foreground">
-              Click <span className="font-medium text-emerald-600">Transcribe Audio</span> to
-              generate timed subtitles from this file&apos;s audio.
-            </p>
-            <p className="max-w-xs text-[11px] text-muted-foreground">
-              The file plays audibly so the speech engine can hear it through
-              your microphone. Keep your tab open.
-            </p>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <SubtitleList
+              entries={entries}
+              onChange={(next) => setEntries(reindex(next))}
+              className="min-h-0 flex-1"
+              emptyLabel="Listening…"
+            />
           </div>
-        ) : (
-          <SubtitleList
-            entries={entries}
-            onChange={(next) => setEntries(reindex(next))}
-            className="min-h-0 flex-1"
-            emptyLabel="Listening…"
-          />
-        )}
-      </div>
+        </>
+      )}
 
       {/* Download */}
       <div className="flex items-center gap-2 border-t pt-2">

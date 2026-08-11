@@ -56,6 +56,47 @@ export function isTranscriptionSupported(): boolean {
   return getSpeechRecognition() !== null;
 }
 
+export type MicPermissionState = "granted" | "denied" | "unavailable";
+
+/**
+ * Pre-check microphone access by calling getUserMedia. This triggers the
+ * browser permission prompt up-front and lets us fail fast (with a clear
+ * message) instead of running silently for minutes producing nothing.
+ *
+ * Returns "granted" if the mic is accessible, "denied" if the user or
+ * environment (e.g. sandboxed iframe) blocks it, or "unavailable" if there
+ * is no microphone hardware / API.
+ */
+export async function checkMicrophonePermission(): Promise<MicPermissionState> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    return "unavailable";
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
+    return "granted";
+  } catch (e) {
+    const err = e as DOMException;
+    if (err.name === "NotAllowedError" || err.name === "SecurityError") {
+      return "denied";
+    }
+    if (err.name === "NotFoundError" || err.name === "OverconstrainedError") {
+      return "unavailable";
+    }
+    return "denied";
+  }
+}
+
+/** Detect if we're running inside a cross-origin iframe (mic often blocked). */
+export function isInsideIframe(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
 export interface TranscriptionLanguage {
   code: string;
   label: string;
@@ -141,6 +182,24 @@ export class AudioTranscriber {
     if (!Ctor) {
       this.fail(
         "Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.",
+      );
+      return;
+    }
+
+    // Pre-check microphone access so we fail fast with a clear message
+    // instead of running silently and producing nothing.
+    const mic = await checkMicrophonePermission();
+    if (mic === "unavailable") {
+      this.fail(
+        "No microphone is available. Connect a mic, or switch to Manual mode to create subtitles by typing.",
+      );
+      return;
+    }
+    if (mic === "denied") {
+      this.fail(
+        isInsideIframe()
+          ? "Microphone access is blocked in this embedded preview. Open SubtitleLab in its own browser tab to use auto-transcription, or switch to Manual mode."
+          : "Microphone access was blocked. Allow mic access in your browser, or switch to Manual mode to create subtitles by typing.",
       );
       return;
     }
