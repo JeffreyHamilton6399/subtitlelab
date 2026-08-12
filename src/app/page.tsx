@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Captions, FileText, Plus, Mic } from "lucide-react";
 import { Header } from "@/components/header";
-import { Footer } from "@/components/footer";
+import { SiteFooter } from "@/components/site-footer";
 import { Dropzone } from "@/components/dropzone";
 import { ExtractMode } from "@/components/extract-mode";
 import { EditMode } from "@/components/edit-mode";
@@ -139,7 +139,7 @@ export default function Home() {
           </>
         )}
       </main>
-      <Footer />
+      <SiteFooter />
     </div>
   );
 }
