@@ -14,12 +14,7 @@ export function Header() {
     <header className="flex h-12 shrink-0 items-center justify-between border-b px-3 sm:px-4">
       <div className="flex items-center gap-2">
         <Logo size={26} />
-        <div className="flex flex-col leading-none">
-          <span className="text-sm font-semibold tracking-tight">SubtitleLab</span>
-          <span className="hidden text-[10px] text-muted-foreground sm:block">
-            Extract · Create · Fix — privately
-          </span>
-        </div>
+        <span className="text-sm font-semibold tracking-tight">SubtitleLab</span>
       </div>
 
       <div className="flex items-center gap-1.5">
