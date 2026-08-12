@@ -4,7 +4,7 @@ import * as React from "react";
 import { Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
-import { SettingsMenu } from "@/components/settings-menu";
+import { SiteSettingsMenu } from "@/components/site-settings-menu";
 import { FeedbackButton } from "@/components/feedback-button";
 
 const DONATE_URL = "https://buymeacoffee.com/jeffreyscof";
@@ -35,7 +35,7 @@ export function Header() {
             <span className="hidden sm:inline">Donate</span>
           </a>
         </Button>
-        <SettingsMenu />
+        <SiteSettingsMenu />
       </div>
     </header>
   );
