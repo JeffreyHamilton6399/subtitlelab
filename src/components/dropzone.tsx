@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Captions, FileText, UploadCloud } from "lucide-react";
+import { ShieldCheck, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -9,7 +9,6 @@ import {
   isVideoFile,
   isAudioFile,
 } from "@/lib/subtitle";
-import { isMobile } from "@/lib/mobile";
 
 interface DropzoneProps {
   onFile: (file: File) => void;
@@ -74,7 +73,7 @@ export function Dropzone({ onFile, className }: DropzoneProps) {
       }}
       aria-label="Drop a video or subtitle file, or click to choose"
       className={cn(
-        "group flex w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors sm:p-12",
+        "group mx-auto flex min-h-[300px] w-full max-w-md cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
         dragging
           ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20"
           : "border-border hover:border-emerald-400 hover:bg-muted/50",
@@ -94,7 +93,7 @@ export function Dropzone({ onFile, className }: DropzoneProps) {
 
       <div
         className={cn(
-          "flex size-14 items-center justify-center rounded-full border transition-colors",
+          "flex size-12 items-center justify-center rounded-full border transition-colors",
           dragging
             ? "border-emerald-500 bg-emerald-500/10"
             : "border-border bg-muted text-muted-foreground group-hover:text-emerald-600",
@@ -103,29 +102,18 @@ export function Dropzone({ onFile, className }: DropzoneProps) {
         <UploadCloud className="size-6" />
       </div>
 
-      <div className="flex flex-col gap-1">
-        <p className="text-base font-semibold tracking-tight">
-          Drop a video or subtitle file
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Extract, create, or fix subtitles — privately in your browser
-        </p>
-      </div>
-
-      <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1">
-          <Captions className="size-3 text-emerald-500" /> Video → subtitles
-        </span>
-        <span className="text-border">·</span>
-        <span className="inline-flex items-center gap-1">
-          <FileText className="size-3 text-amber-500" /> Edit .srt / .vtt / .ass
-        </span>
-      </div>
-
-      <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-        No uploads · No sign-up · 100% free
-        {isMobile() ? " · Mobile" : " · Desktop"}
+      <p className="text-base font-semibold tracking-tight">
+        Drop a video or subtitle
       </p>
+      <p className="max-w-[34ch] text-sm text-muted-foreground">
+        Extract, create, and fix subtitles — privately in your browser.
+      </p>
+      <p className="text-xs text-muted-foreground/70">or click to browse</p>
+
+      <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+        <ShieldCheck className="size-3.5 text-emerald-500" />
+        No uploads · No sign-up · 100% free
+      </span>
     </div>
   );
 }
