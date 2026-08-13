@@ -72,8 +72,8 @@ export default function Home() {
       <Header />
       <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 sm:p-4">
         {!file ? (
-          <div className="flex flex-1 items-center justify-center">
-            <div className="mx-auto w-full max-w-lg">
+          <div className="flex flex-1 overflow-y-auto">
+            <div className="m-auto w-full max-w-lg shrink-0">
               <Dropzone onFile={handleFile} />
               <p className="mt-3 text-center text-[11px] text-muted-foreground">
                 Extract and create subtitles without uploading your files.
